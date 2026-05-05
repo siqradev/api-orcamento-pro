@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model ReferenceTable {
+  id          String     @id @default(uuid())
+  state       String
+  createdAt   DateTime   @default(now())
+  description String?
+  reference   String?
+  source      Source
+  type        TableType?
+  month       Int
+  year        Int
+  items       Item[]
+
+  @@unique([source, state, month, year, type])
+}
+
+model Item {
+  id               String         @id @default(uuid())
+  code             String
+  description      String
+  unit             String
+  referenceTableId String
+  basePrice        Decimal?       @db.Decimal(12, 4)
+  type             ItemType
+  category         String?
+  coefficient      Decimal?       @db.Decimal(12, 6)
+  usedIn           Composition[]  @relation("ChildItem")
+  compositions     Composition[]  @relation("ParentItem")
+  referenceTable   ReferenceTable @relation(fields: [referenceTableId], references: [id])
+
+  @@unique([code, referenceTableId])
+}
+
+model Composition {
+  id           String  @id @default(uuid())
+  parentItemId String
+  childItemId  String
+  coefficient  Decimal @db.Decimal(12, 6)
+  childItem    Item    @relation("ChildItem", fields: [childItemId], references: [id])
+  parentItem   Item    @relation("ParentItem", fields: [parentItemId], references: [id], onDelete: Cascade)
+
+  @@unique([parentItemId, childItemId])
+}
+
+model ImportJob {
+  id         String     @id @default(uuid())
+  source     Source
+  status     JobStatus
+  itemsCount Int?
+  logs       String?
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  month      Int
+  state      String
+  type       TableType?
+  year       Int
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  owner     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+enum Source {
+  SINAPI
+  SEINFRA
+}
+
+enum ItemType {
+  INSUMO
+  COMPOSICAO
+}
+
+enum TableType {
+  DESONERADA
+  ONERADA
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}

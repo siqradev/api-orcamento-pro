@@ -1,0 +1,31 @@
+# Node
+node_modules/
+dist/
+coverage/
+
+# Env
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Temp uploads
+temp/
+uploads/
+
+# Prisma generated
+generated/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
