@@ -14,34 +14,45 @@ export class ImportController {
     reply: FastifyReply
   ) {
     try {
-      const parts = request.parts()
-
       let filePath = ''
-      const fields: Record<string, any> = {}
+      let fields: Record<string, any> = {}
 
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          const savePath = path.resolve(
-            process.cwd(),
-            'temp',
-            part.filename
-          )
+      const contentType =
+        request.headers['content-type'] || ''
 
-          await pipeline(
-            part.file,
-            fs.createWriteStream(savePath)
-          )
+      // Se for multipart (arquivo manual)
+      if (
+        contentType.includes(
+          'multipart/form-data'
+        )
+      ) {
+        const parts = request.parts()
 
-          filePath = savePath
-        } else {
-          fields[part.fieldname] = part.value
+        for await (const part of parts) {
+          if (part.type === 'file') {
+            const savePath = path.resolve(
+              process.cwd(),
+              'temp',
+              part.filename
+            )
+
+            await pipeline(
+              part.file,
+              fs.createWriteStream(savePath)
+            )
+
+            filePath = savePath
+          } else {
+            fields[part.fieldname] =
+              part.value
+          }
         }
-      }
-
-      if (!filePath) {
-        return reply.status(400).send({
-          error: 'Nenhum arquivo enviado.'
-        })
+      } else {
+        // Se for JSON (download automático)
+        fields = request.body as Record<
+          string,
+          any
+        >
       }
 
       const result =

@@ -145,71 +145,40 @@ class TableParser:
 
         return insumos
 
-    def parse_sinapi_coeficientes(
+    def parse_sinapi_referencia(
         self,
         file_path,
+        sheet_name,
         reference_table_id
     ):
-        """
-        Parser SINAPI
-        Arquivo:
-        SINAPI_familias_e_coeficientes
-        """
-
         df = self._read_file(
             file_path,
-            sheet_name="Coeficientes",
+            sheet_name=sheet_name,
             header=5
-        )
-
-        df = self._normalize_columns(df)
-
-        print(
-            "COLUNAS ENCONTRADAS:",
-            df.columns.tolist(),
-            file=sys.stderr
         )
 
         results = []
 
         for _, row in df.iterrows():
+            categoria = str(
+                row.iloc[0]
+            ).strip()
+
             codigo = str(
-                row.get(
-                    "código do insumo",
-                    ""
-                )
+                row.iloc[1]
             ).strip()
 
             descricao = str(
-                row.get(
-                    "descrição do insumo",
-                    ""
-                )
+                row.iloc[2]
             ).strip()
 
             unidade = str(
-                row.get(
-                    "unidade",
-                    ""
-                )
+                row.iloc[3]
             ).strip()
 
-            coeficiente = row.get(
-                "coeficiente",
-                1
+            preco = self._clean_price(
+                row.iloc[-1]
             )
-
-            preco_ce = row.get(
-                "ce",
-                0
-            )
-
-            categoria = str(
-                row.get(
-                    "categoria",
-                    ""
-                )
-            ).strip()
 
             if codigo in ["", "nan"]:
                 continue
@@ -217,24 +186,25 @@ class TableParser:
             if descricao in ["", "nan"]:
                 continue
 
+            if preco <= 0:
+                continue
+
             results.append({
                 "code": codigo,
+                "category": categoria,
                 "description": descricao,
                 "unit": unidade,
-                "type": "INSUMO",
-                "category": categoria,
-                "coefficient": self._clean_price(
-                    coeficiente
-                ),
-                "basePrice": self._clean_price(
-                    preco_ce
-                ),
+                "type":
+                    "INSUMO"
+                    if sheet_name in ["ISD", "ICD"]
+                    else "COMPOSICAO",
+                "basePrice": preco,
                 "referenceTableId":
                     reference_table_id
             })
 
         print(
-            f"TOTAL SINAPI PARSEADO: {len(results)}",
+            f"{sheet_name} TOTAL: {len(results)}",
             file=sys.stderr
         )
 
@@ -261,14 +231,21 @@ class TableParser:
 
         if (
             source == "SINAPI"
-            and data_type == "ANALITICO"
+            and data_type in [
+                "ISD",
+                "ICD",
+                "CSD",
+                "CCD"
+            ]
         ):
-            return self.parse_sinapi_coeficientes(
+            return self.parse_sinapi_referencia(
                 file_path,
+                data_type,
                 reference_table_id
             )
 
         return []
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 5:
