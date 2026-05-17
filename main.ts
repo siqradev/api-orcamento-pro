@@ -1,66 +1,64 @@
-import Fastify from 'fastify';
-import multipart from '@fastify/multipart'; // 1. IMPORTANTE: Importar o plugin
-import { verifyApiKey } from './src/infra/http/middlewares/verify-api-key';
-import { prisma } from './src/infra/database/prisma';
-import { PrismaItemsRepository } from './src/infra/database/PrismaItemsRepository';
+// main.ts
+// Ponto de entrada da aplicação — APENAS configuração do Fastify
+// Toda lógica de negócio e injeção de dependências ficam nas rotas
 
-import { ImportTableUseCase } from './src/application/use-cases/ImportTableUseCase';
-import { SinapiScraper } from './src/infra/scrapers/SinapiScraper';
-import { ImportController } from './src/infra/http/controllers/ImportController';
-import { GetItemController } from './src/infra/http/controllers/GetItemController'
+import 'dotenv/config'
+import Fastify from 'fastify'
+import multipart from '@fastify/multipart'
+
+import { verifyApiKey } from './src/infra/http/middlewares/verify-api-key'
+import { routes } from './src/infra/http/routes'
 
 const app = Fastify({
-  logger: true,
-  connectionTimeout: 300000 
-});
+  logger: {
+    level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
+  },
+  // 5 minutos para imports grandes (SINAPI tem 6000+ itens)
+  connectionTimeout: 300_000,
+})
 
-// 2. REGISTRAR O PLUGIN MULTIPART ANTES DE TUDO
-// Isso resolve o erro "request.file is not a function"
+// ─── Plugins ──────────────────────────────────────────────────────────────────
+
 app.register(multipart, {
   limits: {
-    fieldNameSize: 100, // Max field name size em bytes
-    fieldSize: 100,     // Max field value size em bytes
-    fields: 10,         // Max número de campos non-file
-    fileSize: 100000000, // LImite de 100MB para o arquivo da tabela
-    files: 1            // Max número de arquivos por requisição
-  }
-});
+    fileSize: 100 * 1024 * 1024, // 100 MB
+    files: 1,
+  },
+})
 
-// 3. Segurança Global
-app.addHook('preHandler', verifyApiKey);
+// ─── Autenticação global ──────────────────────────────────────────────────────
+// Todas as rotas exigem x-api-key, exceto /health (skipAuth: true)
 
-// 4. Injeção de Dependências
-const repository = new PrismaItemsRepository(prisma);
-const scraper = new SinapiScraper();
+app.addHook('preHandler', async (request, reply) => {
+  // Pula auth para rotas marcadas com skipAuth
+  if ((request.routeOptions?.config as any)?.skipAuth) return
+  return verifyApiKey(request, reply)
+})
 
-const getItemController = new GetItemController()
-const importTableUseCase = new ImportTableUseCase(scraper, repository);
-const importController = new ImportController(importTableUseCase);
+// ─── Rotas ────────────────────────────────────────────────────────────────────
 
-// 5. Definição das Rotas
-app.post('/import', (req, res) => importController.handle(req, res));
+app.register(routes)
 
-app.get('/health', async () => {
-  return { 
-    status: 'ok', 
-    service: 'api_orcamento_pro',
-    timestamp: new Date().toISOString()
-  };
-});
+// ─── Handler de erros não tratados ───────────────────────────────────────────
 
-app.get('/items/:code',(req, res) =>
-    getItemController.handle(req, res)
-)
+app.setErrorHandler((error:any, _request, reply) => {
+  app.log.error(error)
+  reply.status(error.statusCode ?? 500).send({
+    error: error.message ?? 'Erro interno no servidor.',
+  })
+})
+
+// ─── Start ────────────────────────────────────────────────────────────────────
 
 const start = async () => {
   try {
-    // Porta alterada para 3000 conforme seu código, mas verifique se o Insomnia aponta para ela
-    await app.listen({ port: 3000, host: '0.0.0.0' });
-    console.log('🚀 API de Orçamento Profissional rodando em http://localhost:3000');
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
+    const port = Number(process.env.PORT ?? 3000)
+    await app.listen({ port, host: '0.0.0.0' })
+    console.log(`🚀 API OrcaBuild Pro rodando em http://localhost:${port}`)
+  } catch (err:any) {
+    app.log.error(err)
+    process.exit(1)
   }
-};
+}
 
-start();
+start()

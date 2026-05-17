@@ -61,6 +61,7 @@ export class SinapiScraper {
         'data',
         (data) => {
           stdout += data.toString()
+
           console.log(
             `[PYTHON]: ${data.toString()}`
           )
@@ -71,6 +72,7 @@ export class SinapiScraper {
         'data',
         (data) => {
           stderr += data.toString()
+
           console.error(
             `[PYTHON ERROR]: ${data.toString()}`
           )
@@ -88,25 +90,34 @@ export class SinapiScraper {
             )
           }
 
-          const match =
-            stdout.match(
-              /Download concluído: (.+)/
-            ) ||
-            stdout.match(
-              /SUCESSO: (.+)/
+          try {
+            const result =
+              JSON.parse(stdout)
+
+            if (!result.success) {
+              return reject(
+                new Error(
+                  result.error ||
+                    'Falha no scraper Python'
+                )
+              )
+            }
+
+            console.log(
+              '[IMPORT] Excel localizado:',
+              result.excel_path
             )
 
-          if (!match) {
-            return reject(
+            resolve(
+              result.excel_path
+            )
+          } catch (error) {
+            reject(
               new Error(
-                `Caminho não encontrado no log do Python: ${stdout}`
+                `Erro ao interpretar JSON do Python: ${stdout}`
               )
             )
           }
-
-          resolve(
-            match[1].trim()
-          )
         }
       )
     })

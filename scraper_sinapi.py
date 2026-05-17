@@ -1,6 +1,9 @@
 import sys
+import json
+import zipfile
+import pandas as pd
 from pathlib import Path
-from playwright.sync_api import sync_playwright, TimeoutError
+from playwright.sync_api import sync_playwright
 
 
 class SinapiScraper:
@@ -8,18 +11,21 @@ class SinapiScraper:
 
     def __init__(self):
         self.base_path = Path(__file__).resolve().parent
+
         self.temp_dir = self.base_path / "temp"
+
         self.temp_dir.mkdir(exist_ok=True)
 
     def log(self, message):
-        print(f"[SINAPI SCRAPER] {message}")
+        print(
+            f"[SINAPI SCRAPER] {message}",
+            file=sys.stderr
+        )
 
     def load_all_reports(self, page):
-        """
-        Faz scroll até o fim para carregar todos os relatórios.
-        Necessário porque o portal carrega itens dinamicamente.
-        """
-        self.log("Carregando todos os relatórios...")
+        self.log(
+            "Carregando relatórios dinâmicos..."
+        )
 
         previous_height = 0
 
@@ -39,57 +45,157 @@ class SinapiScraper:
 
             page.wait_for_timeout(2000)
 
-        self.log("Todos os relatórios carregados.")
-
-    def find_monthly_file(self, page, month, year, extension="xlsx"):
+    def _extract_and_find_xlsx(
+        self,
+        zip_path,
+        year,
+        month
+    ):
         """
-        Localiza o relatório SINAPI por mês/ano.
-        Compatível com padrões:
-        SINAPI-2024-12-FORMATO-XLSX
-        SINAPI_2024_09_FORMATO_XLSX
+        Extrai ZIP e localiza o arquivo correto do SINAPI
         """
 
         self.log(
-            f"Buscando arquivo {month}/{year} ({extension})"
+            f"Extraindo conteúdo de {zip_path.name}..."
         )
 
-        links = page.locator("a.link-down")
-        total = links.count()
+        extract_path = (
+            self.temp_dir /
+            f"extracted_{year}_{month}"
+        )
 
-        self.log(f"{total} links encontrados.")
+        extract_path.mkdir(exist_ok=True)
 
-        for i in range(total):
-            try:
-                link = links.nth(i)
-                text = link.inner_text().strip().upper()
+        try:
+            with zipfile.ZipFile(
+                zip_path,
+                'r'
+            ) as zip_ref:
+                zip_ref.extractall(extract_path)
 
-                print(f"[LINK {i}] {text}")
+            excel_files = list(
+                extract_path.rglob("*.xlsx")
+            )
 
-                matches_new_pattern = (
-                    f"{year}-{month}" in text
-                )
+            self.log(
+                f"Arquivos encontrados: {[f.name for f in excel_files]}"
+            )
 
-                matches_old_pattern = (
-                    f"{year}_{month}" in text
+            # PRIORIDADE 1
+            # Arquivo Referência
+
+            for file in excel_files:
+                name = (
+                    file.name
+                    .lower()
+                    .replace("ê", "e")
+                    .replace("é", "e")
                 )
 
                 if (
-                    "SINAPI" in text and
-                    (matches_new_pattern or matches_old_pattern) and
-                    extension.upper() in text
+                    "referencia" in name
+                    and not file.name.startswith("~$")
                 ):
-                    self.log(f"Arquivo encontrado: {text}")
-                    return link
+                    self.log(
+                        f"Arquivo referência encontrado: {file.name}"
+                    )
 
-            except Exception:
-                continue
+                    return str(file)
 
-        raise Exception(
-            f"Arquivo SINAPI {month}/{year} não encontrado."
+            # PRIORIDADE 2
+            # Arquivo com abas ISD/CSD etc
+
+            for file in excel_files:
+                try:
+                    excel = pd.ExcelFile(file)
+
+                    sheets = [
+                        s.upper()
+                        for s in excel.sheet_names
+                    ]
+
+                    if any(
+                        s in sheets
+                        for s in [
+                            "ISD",
+                            "ICD",
+                            "CSD",
+                            "CCD"
+                        ]
+                    ):
+                        self.log(
+                            f"Arquivo SINAPI válido encontrado: {file.name}"
+                        )
+
+                        return str(file)
+
+                except Exception:
+                    continue
+
+            return None
+
+        except Exception as e:
+            self.log(
+                f"Erro na extração: {str(e)}"
+            )
+
+            return None
+
+    def find_monthly_file(
+        self,
+        page,
+        month,
+        year
+    ):
+        """
+        Localiza o arquivo correto no portal da Caixa
+        """
+
+        links = page.locator(
+            "a.link-down"
         )
 
-    def download_table(self, month, year, extension="xlsx"):
+        total = links.count()
+
+        self.log(
+            f"Analisando {total} links..."
+        )
+
+        for i in range(total):
+            text = (
+                links
+                .nth(i)
+                .inner_text()
+                .strip()
+                .upper()
+            )
+
+            matches_date = (
+                f"{year}-{month}" in text
+                or f"{year}_{month}" in text
+            )
+
+            if (
+                "SINAPI" in text
+                and matches_date
+                and "XLSX" in text
+            ):
+                self.log(
+                    f"Arquivo encontrado: {text}"
+                )
+
+                return links.nth(i)
+
+        return None
+
+    def download_table(
+        self,
+        state,
+        month,
+        year
+    ):
         with sync_playwright() as p:
+
             browser = p.chromium.launch(
                 headless=True
             )
@@ -101,101 +207,111 @@ class SinapiScraper:
             page = context.new_page()
 
             try:
-                self.log("Acessando portal da CAIXA...")
+                self.log(
+                    f"Acessando portal da CAIXA para {month}/{year}..."
+                )
 
                 page.goto(
                     self.BASE_URL,
                     wait_until="networkidle",
-                    timeout=120000
+                    timeout=90000
                 )
-
-                page.wait_for_timeout(3000)
 
                 self.load_all_reports(page)
 
                 target_link = self.find_monthly_file(
                     page,
                     month,
-                    year,
-                    extension
+                    year
                 )
 
-                self.log("Iniciando download...")
+                if not target_link:
+                    raise Exception(
+                        f"Arquivo SINAPI {month}/{year} não localizado."
+                    )
 
-                with page.expect_download(timeout=120000) as download_info:
+                self.log(
+                    "Iniciando download..."
+                )
+
+                with page.expect_download(
+                    timeout=120000
+                ) as download_info:
+
                     target_link.click()
 
                 download = download_info.value
 
-                filename = f"SINAPI_{year}_{month}.{extension}.zip"
+                zip_path = (
+                    self.temp_dir /
+                    f"SINAPI_{year}_{month}_RAW.zip"
+                )
 
-                save_path = self.temp_dir / filename
+                download.save_as(
+                    str(zip_path)
+                )
 
-                download.save_as(str(save_path))
+                excel_path = (
+                    self._extract_and_find_xlsx(
+                        zip_path,
+                        year,
+                        month
+                    )
+                )
 
-                if not save_path.exists():
+                if not excel_path:
                     raise Exception(
-                        "Falha ao salvar arquivo."
+                        "Excel de referência não encontrado dentro do ZIP."
                     )
 
-                self.log(
-                    f"Download concluído: {save_path}"
-                )
-
-                print(f"SUCESSO: {save_path}")
-
-                return str(save_path)
-
-            except TimeoutError:
-                self.log("Timeout na automação.")
-                page.screenshot(
-                    path=str(self.temp_dir / "timeout_error.png")
-                )
-                raise
+                return {
+                    "success": True,
+                    "state": state,
+                    "excel_path": excel_path,
+                    "zip_path": str(zip_path)
+                }
 
             except Exception as e:
-                self.log(f"Erro: {str(e)}")
-                page.screenshot(
-                    path=str(self.temp_dir / "error_debug.png")
+
+                self.log(
+                    f"Erro: {str(e)}"
                 )
-                raise
+
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
 
             finally:
                 browser.close()
 
 
-def validate_args():
-    """
-    Uso:
-    python scraper_sinapi.py UF MES ANO
-    UF é ignorada (mantida por compatibilidade).
-    """
+if __name__ == "__main__":
 
-    if len(sys.argv) != 4:
-        raise Exception(
-            "Uso correto: python scraper_sinapi.py UF MES ANO"
-        )
+    if len(sys.argv) < 4:
 
-    state = sys.argv[1].upper()
+        print(json.dumps({
+            "success": False,
+            "error": "Uso: python scraper_sinapi.py UF MES ANO"
+        }))
+
+        sys.exit(1)
+
+    state = sys.argv[1]
     month = sys.argv[2]
     year = sys.argv[3]
 
-    if len(month) != 2:
-        raise Exception("Mês inválido. Use 01-12.")
-
-    if len(year) != 4:
-        raise Exception("Ano inválido.")
-
-    return state, month, year
-
-
-if __name__ == "__main__":
-    state, month, year = validate_args()
-
     scraper = SinapiScraper()
 
-    scraper.download_table(
-        month=month,
-        year=year,
-        extension="xlsx"
+    result = scraper.download_table(
+        state,
+        month,
+        year
+    )
+
+    print(
+        json.dumps(
+            result,
+            ensure_ascii=False
+        )
     )

@@ -1,30 +1,43 @@
+// src/infra/http/controllers/GetItemController.ts
+// Controller limpo: recebe requisição → delega ao UseCase → devolve resposta
+// ZERO dependência de Prisma aqui
+
 import { FastifyRequest, FastifyReply } from 'fastify'
-import { prisma } from '../../database/prisma'
+import { GetItemUseCase } from '../../../application/use-cases/GetItemUseCase'
+
+interface GetItemParams {
+  code: string
+}
+
+interface GetItemQuery {
+  tableId?: string
+}
 
 export class GetItemController {
-  async handle(
-    request: FastifyRequest,
-    reply: FastifyReply
-  ) {
-    const { code } = request.params as {
-      code: string
+  constructor(private readonly useCase: GetItemUseCase) {}
+
+  async handle(request: FastifyRequest, reply: FastifyReply) {
+    const { code } = request.params as GetItemParams
+    const { tableId } = request.query as GetItemQuery
+
+    if (!code || code.trim() === '') {
+      return reply.status(400).send({ error: 'Código do item é obrigatório.' })
     }
 
-    const item = await prisma.item.findFirst({
-      where: {
-        code
-      },
-      include: {
-        referenceTable: true
-      }
-    })
-
-    if (!item) {
-      return reply.status(404).send({
-        error: 'Item não encontrado'
+    if (!tableId) {
+      return reply.status(400).send({
+        error: 'Parâmetro tableId é obrigatório. Ex: ?tableId=<uuid>',
       })
     }
 
-    return reply.send(item)
+    const item = await this.useCase.execute(code.trim(), tableId)
+
+    if (!item) {
+      return reply.status(404).send({
+        error: `Item com código "${code}" não encontrado na tabela ${tableId}.`,
+      })
+    }
+
+    return reply.status(200).send(item)
   }
 }
