@@ -7,65 +7,108 @@ datasource db {
 }
 
 model ReferenceTable {
-  id          String     @id @default(uuid())
-  state       String
-  createdAt   DateTime   @default(now())
+  id        String    @id @default(uuid())
+  state     String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
+  deletedAt DateTime?
+
   description String?
   reference   String?
-  source      Source
-  type        TableType?
-  month       Int
-  year        Int
-  items       Item[]
+
+  source Source
+  type   TableType?
+
+  month Int
+  year  Int
+
+  items Item[]
 
   @@unique([source, state, month, year, type])
+  @@index([state])
+  @@index([source])
 }
 
 model Item {
-  id               String         @id @default(uuid())
-  code             String
-  description      String
-  unit             String
+  id String @id @default(uuid())
+
+  code        String
+  description String
+  searchText  String?
+
+  unit String
+
   referenceTableId String
-  basePrice        Decimal?       @db.Decimal(12, 4)
-  type             ItemType
-  category         String?
-  coefficient      Decimal?       @db.Decimal(12, 6)
-  usedIn           Composition[]  @relation("ChildItem")
-  compositions     Composition[]  @relation("ParentItem")
-  referenceTable   ReferenceTable @relation(fields: [referenceTableId], references: [id])
+
+  basePrice Decimal? @db.Decimal(12, 4)
+
+  type ItemType
+
+  category String?
+
+  coefficient Decimal? @db.Decimal(12, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  deletedAt DateTime?
+
+  usedIn       Composition[] @relation("ChildItem")
+  compositions Composition[] @relation("ParentItem")
+
+  referenceTable ReferenceTable @relation(fields: [referenceTableId], references: [id])
 
   @@unique([code, referenceTableId])
+  @@index([code])
+  @@index([referenceTableId])
+  @@index([description])
+  @@index([searchText])
 }
 
 model Composition {
-  id           String  @id @default(uuid())
+  id String @id @default(uuid())
+
   parentItemId String
   childItemId  String
-  coefficient  Decimal @db.Decimal(12, 6)
-  childItem    Item    @relation("ChildItem", fields: [childItemId], references: [id])
-  parentItem   Item    @relation("ParentItem", fields: [parentItemId], references: [id], onDelete: Cascade)
+
+  coefficient Decimal @db.Decimal(12, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  childItem Item @relation("ChildItem", fields: [childItemId], references: [id])
+
+  parentItem Item @relation("ParentItem", fields: [parentItemId], references: [id], onDelete: Cascade)
 
   @@unique([parentItemId, childItemId])
+  @@index([parentItemId])
+  @@index([childItemId])
 }
 
 model ImportJob {
-  id         String     @id @default(uuid())
-  source     Source
-  status     JobStatus
+  id String @id @default(uuid())
+
+  source Source
+  status JobStatus
+
   itemsCount Int?
   logs       String?
-  startedAt  DateTime   @default(now())
+
+  startedAt  DateTime  @default(now())
   finishedAt DateTime?
-  month      Int
-  state      String
-  type       TableType?
-  year       Int
+
+  month Int
+  state String
+  type  TableType?
+  year  Int
+
+  @@index([status])
+  @@index([source])
 }
 
 model ApiKey {
   id        String   @id @default(uuid())
-  key       String   @unique
+  hash      String
   owner     String
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
